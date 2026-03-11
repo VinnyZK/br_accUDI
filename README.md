@@ -84,6 +84,10 @@ data/         Downloaded datasets (git-ignored)
 | 6 | Devedor com contrato | Empresa em dívida ativa que venceu licitações |
 | 7 | Incentivo cultural cruzado | PEP proponente de projeto cultural incentivado por empresa vinculada |
 
+## Créditos
+
+Este projeto foi inspirado e é um tributado ao trabalho do [br/acc (Brazilian Accelerationism)](https://github.com/World-Open-Graph/br-acc), criado por [Bruno César](https://github.com/brunocesarr) e mantido pela comunidade [World Open Graph](https://github.com/World-Open-Graph). A ideia de cruzar dados públicos em grafo para gerar inteligência cívica nasceu lá. O br_accUDI adapta esse conceito para o contexto municipal de Uberlândia (MG), com stack e implementação independentes.
+
 ## Legal
 
 Todos os dados processados são públicos por lei. Base legal: LAI (Lei 12.527/2011), LC 131/2009, LGPD Art. 7 IV/VII, Lei 14.129/2021.
