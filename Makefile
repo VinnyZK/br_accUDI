@@ -17,14 +17,25 @@ seed: ## Load schema + seed data into Neo4j
 	bash infra/scripts/seed-dev.sh
 
 # ── ETL ─────────────────────────────────────────
-download-cnpj: ## Download CNPJ data from Receita Federal
-	cd etl && python -m openudi_etl.scripts.download_cnpj --data-dir ../data
+ETL_CMD = cd etl && PYTHONPATH=src python -m openudi_etl
 
-etl-cnpj: ## Run CNPJ pipeline
-	cd etl && python -m openudi_etl.runner cnpj --neo4j-password $${NEO4J_PASSWORD:-openudi-dev-2026} --data-dir ../data
+download-cnpj: ## Download CNPJ data from Receita Federal
+	$(ETL_CMD).scripts.download_cnpj --data-dir ../data
+
+etl-cnpj: ## Run CNPJ pipeline (companies + partners)
+	$(ETL_CMD).runner cnpj --data-dir ../data
+
+etl-ceis: ## Run CEIS/CNEP pipeline (sanctions)
+	$(ETL_CMD).runner ceis --data-dir ../data
+
+etl-tse: ## Run TSE pipeline (candidates + elections)
+	$(ETL_CMD).runner tse --data-dir ../data
+
+etl-pncp: ## Run PNCP pipeline (public contracts)
+	$(ETL_CMD).runner pncp --data-dir ../data
 
 bootstrap: ## Run all ETL pipelines (heavy)
-	cd etl && python -m openudi_etl.runner all --neo4j-password $${NEO4J_PASSWORD:-openudi-dev-2026} --data-dir ../data
+	$(ETL_CMD).runner all --data-dir ../data
 
 # ── Quality ─────────────────────────────────────
 lint: ## Run linters
