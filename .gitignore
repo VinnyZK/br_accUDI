@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Data
+data/
+*.csv
+*.zip
+
+# Environment
+.env
+
+# Neo4j
+neo4j-data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Firecrawl
+.firecrawl/
+
+# Audit
+audit-results/
