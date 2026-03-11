@@ -29,19 +29,52 @@ REQUEST_TIMEOUT = 60.0
 
 def _make_sanction_id(source: str, record: dict) -> str:
     """Deterministic ID from source + key fields to allow idempotent MERGE."""
+    fundamento_desc = ""
+    fundamentos = record.get("fundamentacao") or []
+    if isinstance(fundamentos, list) and fundamentos:
+        first = fundamentos[0]
+        if isinstance(first, dict):
+            fundamento_desc = first.get("descricao", "") or first.get("codigo", "")
+    elif isinstance(fundamentos, dict):
+        fundamento_desc = fundamentos.get("descricaoFundamentacao", "")
+
+    cnpj_raw = _extract_cnpj_raw(record)
+    orgao = record.get("orgaoSancionador") or {}
+    orgao_nome = orgao.get("nome", "") if isinstance(orgao, dict) else ""
+
     raw = (
         f"{source}"
-        f"|{record.get('cpfCnpjSancionado', '')}"
+        f"|{cnpj_raw}"
         f"|{record.get('dataInicioSancao', '')}"
-        f"|{record.get('orgaoSancionador', {}).get('nome', '')}"
-        f"|{record.get('fundamentacao', {}).get('descricaoFundamentacao', '')}"
+        f"|{orgao_nome}"
+        f"|{fundamento_desc}"
     )
     return sha256(raw.encode()).hexdigest()[:24]
 
 
+def _extract_cnpj_raw(record: dict) -> str:
+    """Extract raw CNPJ/CPF string from the record (various field locations)."""
+    # Try sancionado.codigoFormatado
+    sancionado = record.get("sancionado") or {}
+    if isinstance(sancionado, dict):
+        raw = sancionado.get("codigoFormatado", "")
+        if raw:
+            return raw
+
+    # Try pessoa.cnpjFormatado
+    pessoa = record.get("pessoa") or {}
+    if isinstance(pessoa, dict):
+        raw = pessoa.get("cnpjFormatado", "") or pessoa.get("cpfFormatado", "")
+        if raw:
+            return raw
+
+    # Fallback
+    return record.get("cpfCnpjSancionado", "") or ""
+
+
 def _extract_cnpj(record: dict) -> str | None:
     """Return cleaned 14-digit CNPJ or None."""
-    raw = record.get("cpfCnpjSancionado", "") or ""
+    raw = _extract_cnpj_raw(record)
     digits = raw.replace(".", "").replace("/", "").replace("-", "").strip()
     if len(digits) == 14:
         return digits
@@ -133,6 +166,10 @@ class CeisPipeline(Pipeline):
                 logger.debug("  %s page %d", label, page)
 
                 resp = client.get(base_url, headers=headers, params=query)
+
+                # API returns 400 when page is past the last one
+                if resp.status_code == 400:
+                    break
                 resp.raise_for_status()
 
                 data = resp.json()
@@ -169,25 +206,46 @@ class CeisPipeline(Pipeline):
         for record in records:
             cnpj = _extract_cnpj(record)
             if not cnpj:
-                # Skip non-CNPJ entries (PFs without company link)
                 continue
 
             sanction_id = _make_sanction_id(source, record)
 
             orgao = record.get("orgaoSancionador") or {}
-            fundamento = record.get("fundamentacao") or {}
+            orgao_nome = orgao.get("nome", "") if isinstance(orgao, dict) else ""
+
+            # Extract reason from fundamentacao (list of dicts)
+            reason = ""
+            fundamentos = record.get("fundamentacao") or []
+            if isinstance(fundamentos, list) and fundamentos:
+                first = fundamentos[0]
+                if isinstance(first, dict):
+                    reason = first.get("descricao", "") or first.get("codigo", "")
+            elif isinstance(fundamentos, dict):
+                reason = fundamentos.get("descricaoFundamentacao", "")
+
+            # Get name from sancionado or pessoa
+            sancionado = record.get("sancionado") or {}
+            pessoa = record.get("pessoa") or {}
+            nome = ""
+            if isinstance(sancionado, dict):
+                nome = sancionado.get("nome", "")
+            if not nome and isinstance(pessoa, dict):
+                nome = pessoa.get("nome", "") or pessoa.get("razaoSocialReceita", "")
 
             sanction = {
                 "sanction_id": sanction_id,
                 "type": source,
                 "company_cnpj": cnpj,
-                "razao_social": (record.get("nomeSancionado") or "").strip().upper(),
-                "reason": (fundamento.get("descricaoFundamentacao") or "").strip(),
+                "razao_social": (nome or "").strip().upper(),
+                "reason": (reason or "").strip()[:500],
                 "date_start": (record.get("dataInicioSancao") or "").strip() or None,
                 "date_end": (record.get("dataFimSancao") or "").strip() or None,
                 "source": source,
-                "orgao_sancionador": (orgao.get("nome") or "").strip(),
-                "uf_sancionado": (record.get("ufSancionado") or "").strip(),
+                "orgao_sancionador": orgao_nome.strip(),
+                "uf_sancionado": (
+                    (orgao.get("siglaUf", "") if isinstance(orgao, dict) else "")
+                    or ""
+                ).strip(),
             }
             self._sanctions.append(sanction)
 

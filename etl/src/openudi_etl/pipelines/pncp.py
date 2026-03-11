@@ -21,8 +21,21 @@ PNCP_BASE_URL = "https://pncp.gov.br/api/consulta/v1"
 CONTRATACOES_URL = f"{PNCP_BASE_URL}/contratacoes/publicacao"
 IBGE_UBERLANDIA = "3170206"
 
-# API page size limit
-PAGE_SIZE = 500
+# PNCP procurement modality codes (codigoModalidadeContratacao)
+# 1=Leilão, 2=Diálogo Competitivo, 3=Concurso, 4=Concorrência,
+# 5=Pregão, 6=Dispensa, 7=Inexigibilidade, 8=Tomada de Preços,
+# 9=Convite, 10=Concorrência Internacional, 11=Manifestação Interesse,
+# 12=Pré-qualificação, 13=Credenciamento
+MODALIDADES = list(range(1, 14))
+
+# API page size (min 10, max 50)
+PAGE_SIZE = 50
+
+# Max date range per request (API limit: 365 days)
+MAX_DATE_RANGE_DAYS = 365
+
+# Number of years to look back
+LOOKBACK_YEARS = 2
 
 # Polite delay between API requests (seconds)
 REQUEST_DELAY = 0.5
@@ -35,6 +48,7 @@ def _fetch_page(
     client: httpx.Client,
     data_inicial: str,
     data_final: str,
+    modalidade: int,
     pagina: int,
 ) -> dict:
     """Fetch a single page from the PNCP contratacoes endpoint."""
@@ -42,6 +56,7 @@ def _fetch_page(
         "dataInicial": data_inicial,
         "dataFinal": data_final,
         "codigoMunicipioIbge": IBGE_UBERLANDIA,
+        "codigoModalidadeContratacao": modalidade,
         "pagina": pagina,
         "tamanhoPagina": PAGE_SIZE,
     }
@@ -49,12 +64,25 @@ def _fetch_page(
     for attempt in range(MAX_REQUEST_RETRIES):
         try:
             resp = client.get(CONTRATACOES_URL, params=params, timeout=60)
+
+            # No results: 204 No Content, 400, or 404
+            if resp.status_code in (204, 400, 404):
+                return {"data": []}
+
+            # Server errors — retry
+            if resp.status_code >= 500:
+                raise httpx.HTTPStatusError(
+                    f"Server error {resp.status_code}",
+                    request=resp.request,
+                    response=resp,
+                )
+
             resp.raise_for_status()
             return resp.json()
         except (httpx.HTTPStatusError, httpx.TransportError) as exc:
             wait = 2 ** (attempt + 1)
             logger.warning(
-                "PNCP request failed (attempt %d/%d): %s — retrying in %ds",
+                "PNCP request error (attempt %d/%d): %s — retrying in %ds",
                 attempt + 1,
                 MAX_REQUEST_RETRIES,
                 exc,
@@ -62,10 +90,12 @@ def _fetch_page(
             )
             time.sleep(wait)
 
-    raise RuntimeError(
-        f"PNCP API failed after {MAX_REQUEST_RETRIES} retries "
-        f"(pagina={pagina}, dataInicial={data_inicial}, dataFinal={data_final})"
+    # After all retries failed, return empty instead of crashing
+    logger.warning(
+        "PNCP API failed after %d retries (pagina=%d, mod=%d, %s–%s) — skipping",
+        MAX_REQUEST_RETRIES, pagina, modalidade, data_inicial, data_final,
     )
+    return {"data": []}
 
 
 def _fetch_contract_items(
@@ -107,63 +137,89 @@ class PncpPipeline(Pipeline):
     # Extract
     # ------------------------------------------------------------------
 
-    def extract(self) -> None:
-        """Fetch all contracts for Uberlandia from PNCP (last 2 years)."""
-        today = date.today()
-        start_date = today - timedelta(days=730)
+    @staticmethod
+    def _date_chunks(start: date, end: date) -> list[tuple[str, str]]:
+        """Split a date range into chunks of at most MAX_DATE_RANGE_DAYS."""
+        chunks: list[tuple[str, str]] = []
+        cursor = start
+        while cursor < end:
+            chunk_end = min(cursor + timedelta(days=MAX_DATE_RANGE_DAYS - 1), end)
+            chunks.append((
+                cursor.strftime("%Y%m%d"),
+                chunk_end.strftime("%Y%m%d"),
+            ))
+            cursor = chunk_end + timedelta(days=1)
+        return chunks
 
-        # PNCP expects dates as YYYYMMDD
-        data_inicial = start_date.strftime("%Y%m%d")
-        data_final = today.strftime("%Y%m%d")
+    def extract(self) -> None:
+        """Fetch all contracts for Uberlandia from PNCP."""
+        today = date.today()
+        start_date = today - timedelta(days=LOOKBACK_YEARS * 365)
+
+        date_chunks = self._date_chunks(start_date, today)
 
         logger.info(
-            "Fetching PNCP contracts for Uberlandia from %s to %s",
-            data_inicial,
-            data_final,
+            "Fetching PNCP contracts for Uberlandia: %d date chunks × %d modalidades",
+            len(date_chunks),
+            len(MODALIDADES),
         )
 
         all_records: list[dict] = []
+        hit_limit = False
 
         with httpx.Client(
             headers={"Accept": "application/json"},
             follow_redirects=True,
         ) as client:
-            pagina = 1
-            while True:
-                logger.info("  Fetching page %d ...", pagina)
-                data = _fetch_page(client, data_inicial, data_final, pagina)
-
-                # The API wraps results in a list or returns an object with a
-                # data key — handle both shapes defensively.
-                if isinstance(data, list):
-                    records = data
-                elif isinstance(data, dict):
-                    records = data.get("data", data.get("content", []))
-                    if not isinstance(records, list):
-                        records = []
-                else:
-                    records = []
-
-                if not records:
+            for data_inicial, data_final in date_chunks:
+                if hit_limit:
                     break
 
-                all_records.extend(records)
-                logger.info(
-                    "  Page %d returned %d records (total so far: %d)",
-                    pagina,
-                    len(records),
-                    len(all_records),
-                )
+                for modalidade in MODALIDADES:
+                    if hit_limit:
+                        break
 
-                if self.limit and len(all_records) >= self.limit:
-                    all_records = all_records[: self.limit]
-                    break
+                    pagina = 1
+                    while True:
+                        logger.info(
+                            "  mod=%d  %s–%s  page %d ...",
+                            modalidade, data_inicial, data_final, pagina,
+                        )
+                        try:
+                            data = _fetch_page(
+                                client, data_inicial, data_final,
+                                modalidade, pagina,
+                            )
+                        except RuntimeError as exc:
+                            logger.warning("Skipping: %s", exc)
+                            break
 
-                if len(records) < PAGE_SIZE:
-                    break
+                        if isinstance(data, list):
+                            records = data
+                        elif isinstance(data, dict):
+                            records = data.get("data", data.get("content", []))
+                            if not isinstance(records, list):
+                                records = []
+                        else:
+                            records = []
 
-                pagina += 1
-                time.sleep(REQUEST_DELAY)
+                        if not records:
+                            break
+
+                        all_records.extend(records)
+
+                        if self.limit and len(all_records) >= self.limit:
+                            all_records = all_records[: self.limit]
+                            hit_limit = True
+                            break
+
+                        if len(records) < PAGE_SIZE:
+                            break
+
+                        pagina += 1
+                        time.sleep(REQUEST_DELAY)
+
+                    time.sleep(REQUEST_DELAY)
 
             # Optionally fetch per-contract items to get supplier CNPJs
             if self._fetch_items:
