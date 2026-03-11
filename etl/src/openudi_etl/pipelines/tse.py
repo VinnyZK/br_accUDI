@@ -25,15 +25,11 @@ logger = logging.getLogger(__name__)
 TSE_BASE = "https://dadosabertos.tse.jus.br/dataset"
 
 # Download URLs for election data (2020 municipal + 2024 municipal)
+# Files are ZIP archives from TSE CDN
+TSE_CDN = "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand"
 TSE_FILES = {
-    "candidatos_2024": (
-        f"{TSE_BASE}/candidatos-2024/resource/"
-        "consulta_cand_2024_BRASIL.csv"
-    ),
-    "candidatos_2020": (
-        f"{TSE_BASE}/candidatos-2020/resource/"
-        "consulta_cand_2020_BRASIL.csv"
-    ),
+    "consulta_cand_2024": f"{TSE_CDN}/consulta_cand_2024.zip",
+    "consulta_cand_2020": f"{TSE_CDN}/consulta_cand_2020.zip",
 }
 
 # Uberlândia municipality code in TSE data
@@ -44,7 +40,7 @@ UDI_MUNICIPIO_NAME = "UBERLÂNDIA"
 TSE_UF_MG = "MG"
 
 
-def _download_tse_file(url: str, dest: Path, timeout: float = 300) -> None:
+def _download_tse_file(url: str, dest: Path, timeout: float = 600) -> None:
     """Download a TSE file."""
     if dest.exists() and dest.stat().st_size > 0:
         logger.info("  Already downloaded: %s", dest.name)
@@ -136,10 +132,10 @@ class TsePipeline(Pipeline):
             self._candidate_files = local_files
             return
 
-        # Download from TSE
+        # Download from TSE CDN (ZIP files)
         self._candidate_files = []
         for key, url in TSE_FILES.items():
-            dest = self.tse_dir / f"{key}.csv"
+            dest = self.tse_dir / f"{key}.zip"
             try:
                 _download_tse_file(url, dest)
                 self._candidate_files.append(dest)
