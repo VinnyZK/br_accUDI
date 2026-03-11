@@ -5,13 +5,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from openudi.config import settings
+from openudi.db import get_driver, close_driver
+from openudi.routers import search, graph, meta, patterns
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Startup: future Neo4j driver init goes here
+    # Startup: initialize Neo4j driver
+    await get_driver()
     yield
-    # Shutdown: future Neo4j driver close goes here
+    # Shutdown: close Neo4j driver
+    await close_driver()
 
 
 app = FastAPI(
@@ -29,6 +33,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register routers
+app.include_router(search.router)
+app.include_router(graph.router)
+app.include_router(meta.router)
+app.include_router(patterns.router)
 
 
 @app.get("/health")
