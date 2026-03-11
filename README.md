@@ -1,10 +1,24 @@
-# br_accUDI
+<p align="center">
+  <img src="docs/logo.png" alt="OpenUDI" width="280" />
+</p>
 
-**Infraestrutura open-source de grafo que cruza dados públicos municipais de Uberlândia para gerar inteligência cívica acionável.**
+<h1 align="center">br_accUDI</h1>
 
-Inspirado no [br/acc](https://github.com/World-Open-Graph/br-acc).
+<p align="center">
+  <strong>Infraestrutura open-source de grafo que cruza dados públicos municipais de Uberlândia para gerar inteligência cívica acionável.</strong>
+</p>
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+<p align="center">
+  Inspirado no <a href="https://github.com/World-Open-Graph/br-acc">br/acc</a>
+</p>
+
+<p align="center">
+  <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
+  <img src="https://img.shields.io/badge/Neo4j-5_Community-008CC1?logo=neo4j" alt="Neo4j" />
+  <img src="https://img.shields.io/badge/FastAPI-0.135-009688?logo=fastapi" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react" alt="React" />
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker" alt="Docker" />
+</p>
 
 ---
 
@@ -58,16 +72,17 @@ data/         Downloaded datasets (git-ignored)
 
 ## Padrões Detectados
 
-| # | Padrão |
-|---|--------|
-| 1 | Empresa sancionada com contrato ativo |
-| 2 | Fracionamento de contratos (< R$ 80k) |
-| 3 | Concentração de fornecedor (> 60%) |
-| 4 | Devedor com contrato |
-| 5 | Doador de campanha → contrato |
-| 6 | Parente de político com contrato |
-| 7 | Isenção fiscal + contrato |
-| 8 | Incentivo cultural cruzado |
+7 algoritmos determinísticos (sem IA/LLM) que cruzam o grafo em busca de irregularidades:
+
+| # | Padrão | Descrição |
+|---|--------|-----------|
+| 1 | Empresa sancionada com contrato | Empresa no CEIS que venceu licitação durante sanção |
+| 2 | Fracionamento de contratos | Multiplos contratos < R$ 80k para mesmo fornecedor no mesmo mês |
+| 3 | Doador de campanha → contrato | Empresa doou para candidato e depois venceu contratos públicos |
+| 4 | Parente de PEP com contrato | Familiar de político é sócio de empresa com contrato público |
+| 5 | Isenção fiscal + contrato | Empresa com isenção tributária que também venceu licitações |
+| 6 | Devedor com contrato | Empresa em dívida ativa que venceu licitações |
+| 7 | Incentivo cultural cruzado | PEP proponente de projeto cultural incentivado por empresa vinculada |
 
 ## Legal
 
